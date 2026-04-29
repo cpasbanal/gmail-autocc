@@ -12,8 +12,6 @@
 //
 // Works on English and French Gmail UIs.
 
-const LOG = (...args) => console.log("[Gmail Auto CC]", ...args);
-
 let RULES = []; // [{ from: string (lc), cc: string, enabled: bool }]
 
 // Normalize for comparison: lowercase, trim, and strip zero-width / NBSP
@@ -54,13 +52,11 @@ chrome.storage.sync.get(["rules", "cc", "matchFrom"], (data) => {
       chrome.storage.sync.set({ rules: RULES });
     }
   }
-  LOG("loaded rules:", RULES);
 });
 
 chrome.storage.onChanged.addListener((changes) => {
   if (changes.rules) {
     RULES = parseRules(changes.rules.newValue);
-    LOG("rules changed:", RULES);
   }
 });
 
@@ -225,7 +221,6 @@ function writeCc(compose, ccAddress) {
   const newValue = existing ? `${existing}, ${ccAddress}` : ccAddress;
   ccInput.focus();
   setNativeValue(ccInput, newValue);
-  LOG("added Cc:", ccAddress);
   return true;
 }
 
@@ -242,38 +237,14 @@ function removeCc(compose, ccAddress) {
     );
     const cleaned = val.replace(pattern, ",").replace(/^,|,$/g, "").trim();
     setNativeValue(ccInput, cleaned);
-    LOG("cleared Cc plain text for:", ccAddress);
   }
 
   // Remove chips Gmail may have created.
   let chip = findCcChip(ccInput, ccAddress);
   while (chip) {
     chip.remove();
-    LOG("removed Cc chip for:", ccAddress);
     chip = findCcChip(ccInput, ccAddress);
   }
-}
-
-function dumpComposeForDebug(compose, tag) {
-  const inputs = [...compose.querySelectorAll("input[aria-label]")].map((el) => ({
-    type: el.type,
-    aria: el.getAttribute("aria-label"),
-    visible: el.offsetParent !== null,
-    value: el.value,
-  }));
-  const links = [
-    ...compose.querySelectorAll(
-      'span[role="link"], [role="button"], button, span'
-    ),
-  ]
-    .filter((el) => /^(cc|cci|bcc|copie)$/i.test(el.textContent.trim()))
-    .map((el) => ({
-      tag: el.tagName,
-      role: el.getAttribute("role"),
-      text: el.textContent.trim(),
-      aria: el.getAttribute("aria-label"),
-    }));
-  LOG(`DEBUG[${tag}]: compose state`, { inputs, ccLikeLinks: links });
 }
 
 // --- main loop -------------------------------------------------------------
@@ -324,16 +295,9 @@ function tick() {
 
     // What we still need to add: every target not currently present.
     const toAdd = [];
-    for (const [key, cc] of targets) {
+    for (const [, cc] of targets) {
       if (!hasCc(compose, cc)) toAdd.push(cc);
     }
-
-    LOG("tick", {
-      from,
-      target: [...targets.values()],
-      previouslyAdded,
-      toAdd,
-    });
 
     if (toAdd.length === 0) {
       setAutoAdded(compose, stillAdded);
@@ -344,16 +308,7 @@ function tick() {
     let ccInput = findCcInput(compose);
     if (!ccInput || ccInput.offsetParent === null) {
       const toggle = findCcToggle(compose);
-      if (toggle) {
-        LOG("revealing Cc field", {
-          text: toggle.textContent.trim(),
-          aria: toggle.getAttribute("aria-label"),
-        });
-        toggle.click();
-      } else {
-        LOG("no Cc input or toggle found");
-        dumpComposeForDebug(compose, "no-toggle");
-      }
+      if (toggle) toggle.click();
       // Cc input will exist on the next tick.
       setAutoAdded(compose, stillAdded);
       continue;
@@ -370,25 +325,3 @@ function tick() {
 const observer = new MutationObserver(tick);
 observer.observe(document.body, { childList: true, subtree: true });
 setInterval(tick, 800);
-
-// Manual debug helper — run `__gmailAutoCcDebug()` from the console to dump
-// what the script sees in every visible compose right now.
-window.__gmailAutoCcDebug = function () {
-  LOG("=== manual debug ===");
-  LOG("rules:", RULES);
-  LOG("primary account:", findPrimaryAccountEmail());
-  let n = 0;
-  for (const compose of findAllComposes()) {
-    if (compose.offsetParent === null) continue;
-    if (!findToInput(compose)) continue;
-    n++;
-    LOG(`--- compose #${n} ---`);
-    LOG("from row:", findFromEmail(compose));
-    LOG("ccInput:", findCcInput(compose));
-    LOG("ccToggle:", findCcToggle(compose));
-    dumpComposeForDebug(compose, "manual");
-  }
-  if (!n) LOG("no visible compose with a To input found");
-};
-
-LOG("content script loaded (build v4 — multi-rule)");
